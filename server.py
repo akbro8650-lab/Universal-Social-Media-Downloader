@@ -24,6 +24,11 @@ def cleanup_old_files(max_age_seconds=900):
             pass
 
 
+def is_youtube_url(url):
+    lower = url.lower()
+    return "youtube.com" in lower or "youtu.be" in lower
+
+
 @app.route("/", methods=["GET"])
 def health_check():
     return jsonify({"status": "online", "service": "MediaVault Backend"}), 200
@@ -50,6 +55,9 @@ def download_media():
     if not url:
         return jsonify({"error": "No URL provided"}), 400
 
+    if is_youtube_url(url):
+        return jsonify({"error": "YouTube links are not supported."}), 400
+
     job_id = str(uuid.uuid4())[:8]
     out_template = os.path.join(DOWNLOAD_DIR, f"{job_id}_%(title).50s.%(ext)s")
 
@@ -60,20 +68,7 @@ def download_media():
         "no_warnings": True,
         "geo_bypass": True,
         "restrictfilenames": True,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android", "ios", "web"]
-            }
-        },
     }
-
-    cookies_txt = os.environ.get("YOUTUBE_COOKIES", "").strip()
-    cookie_file_path = None
-    if cookies_txt:
-        cookie_file_path = os.path.join(DOWNLOAD_DIR, f"{job_id}_cookies.txt")
-        with open(cookie_file_path, "w", encoding="utf-8") as cf:
-            cf.write(cookies_txt)
-        ydl_opts["cookiefile"] = cookie_file_path
 
     if media_type == "audio":
         ydl_opts["format"] = "bestaudio/best"
@@ -100,9 +95,6 @@ def download_media():
                 if not os.path.exists(final_path) and os.path.exists(prepared):
                     final_path = prepared
 
-        if cookie_file_path and os.path.exists(cookie_file_path):
-            os.remove(cookie_file_path)
-
         if not os.path.exists(final_path):
             return jsonify({"error": "File conversion failed on server."}), 500
 
@@ -117,11 +109,6 @@ def download_media():
         }), 200
 
     except Exception as e:
-        if cookie_file_path and os.path.exists(cookie_file_path):
-            try:
-                os.remove(cookie_file_path)
-            except Exception:
-                pass
         return jsonify({"error": str(e)}), 500
 
 
